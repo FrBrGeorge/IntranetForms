@@ -1,0 +1,6 @@
+{
+  "name": "Intranet Forms",
+  "description": "Minimalist intranet forms tool with real-time auto-saving, anonymous session keys, and administrative form editing and response export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

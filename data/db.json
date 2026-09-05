@@ -1,0 +1,34 @@
+{
+  "adminSessionToken": null,
+  "form": {
+    "id": "default",
+    "title": "Intranet Task & Incident Report Form",
+    "description": "Please provide your full name and complete the task instructions below. All fields auto-save in real-time when you move between inputs.",
+    "fullNameLabel": "Full Name",
+    "tasks": [
+      {
+        "id": "task_1",
+        "title": "Task 1: Summary of Work / Incident Description",
+        "description": "Provide a concise summary of the primary task completed or incident observed today.",
+        "placeholder": "Paste or type your summary here...",
+        "required": true
+      },
+      {
+        "id": "task_2",
+        "title": "Task 2: Detailed Steps, Code Snippet or Root Cause",
+        "description": "Detail the exact procedure, configuration changes, or technical logs associated with this task.",
+        "placeholder": "Paste output logs, terminal commands, or diagnostic details...",
+        "required": false
+      },
+      {
+        "id": "task_3",
+        "title": "Task 3: Verification & Next Steps",
+        "description": "Describe how the solution was verified and what follow-up actions are recommended.",
+        "placeholder": "Paste verification notes or next action items...",
+        "required": false
+      }
+    ],
+    "updatedAt": "2026-09-05T12:23:00.000Z"
+  },
+  "responses": {}
+}
