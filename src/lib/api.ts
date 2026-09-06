@@ -28,13 +28,18 @@ async function apiFetch(endpoint: string, options?: RequestInit): Promise<Respon
 
   try {
     const res = await fetch(primaryUrl, options);
-    // If the primary URL yielded 404, the reverse proxy might have stripped or prepended /form
-    if (res.status === 404) {
+    const contentType = res.headers.get('content-type') || '';
+    const isHtmlFallback = contentType.includes('text/html');
+
+    // If 404 or an HTML SPA fallback was returned for an API endpoint, try the alternate prefix
+    if (res.status === 404 || isHtmlFallback) {
       const altPrefix = activeApiPrefix.startsWith('/form') ? '/api' : '/form/api';
       const altUrl = `${altPrefix}${cleanEndpoint}`;
       try {
         const altRes = await fetch(altUrl, options);
-        if (altRes.ok || [400, 401, 403].includes(altRes.status)) {
+        const altContentType = altRes.headers.get('content-type') || '';
+        const altIsHtml = altContentType.includes('text/html');
+        if (!altIsHtml && (altRes.ok || [400, 401, 403].includes(altRes.status))) {
           activeApiPrefix = altPrefix;
           return altRes;
         }
@@ -46,7 +51,9 @@ async function apiFetch(endpoint: string, options?: RequestInit): Promise<Respon
     const altUrl = `${altPrefix}${cleanEndpoint}`;
     try {
       const altRes = await fetch(altUrl, options);
-      if (altRes.ok || [400, 401, 403].includes(altRes.status)) {
+      const altContentType = altRes.headers.get('content-type') || '';
+      const altIsHtml = altContentType.includes('text/html');
+      if (!altIsHtml && (altRes.ok || [400, 401, 403].includes(altRes.status))) {
         activeApiPrefix = altPrefix;
         return altRes;
       }

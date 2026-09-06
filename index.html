@@ -12,6 +12,16 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&display=swap" rel="stylesheet" />
+    <script>
+      // Immediately enforce trailing slash on subpath so relative ./assets/...
+      // resolve correctly against /form/ rather than / in reverse proxies
+      (function() {
+        var p = window.location.pathname;
+        if (p === '/form' || (p.endsWith('/form') && !p.endsWith('/form/'))) {
+          window.location.replace(p + '/' + window.location.search + window.location.hash);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

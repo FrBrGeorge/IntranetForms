@@ -506,11 +506,16 @@ async function startServer() {
     });
   }
 
-  // Vite middleware in development vs static serving in production
-  if (process.env.NODE_ENV !== 'production') {
+  // Static serving in production vs Vite middleware in development
+  const distPath = path.join(process.cwd(), 'dist');
+  const distIndexExists = fs.existsSync(path.join(distPath, 'index.html'));
+  const isProduction = process.env.NODE_ENV === 'production' || (distIndexExists && process.env.NODE_ENV !== 'development');
+
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
+      base: BASE_PATH ? `${BASE_PATH}/` : '/',
     });
     if (BASE_PATH && BASE_PATH !== '') {
       // Strip BASE_PATH so vite middlewares receive /...
@@ -518,8 +523,6 @@ async function startServer() {
     }
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-
     if (BASE_PATH && BASE_PATH !== '') {
       // Serve static assets under BASE_PATH (e.g. /form/assets/...)
       app.use(BASE_PATH, express.static(distPath));
@@ -528,15 +531,18 @@ async function startServer() {
     // Serve static assets at root /
     app.use(express.static(distPath));
 
-    // Catch-all SPA fallback
-    if (BASE_PATH && BASE_PATH !== '') {
-      app.get(`${BASE_PATH}/*`, (req: Request, res: Response) => {
-        res.sendFile(path.join(distPath, 'index.html'));
-      });
-    }
-    app.get('*', (req: Request, res: Response) => {
+    // Catch-all SPA fallback: ensure API routes never return HTML
+    const spaHandler = (req: Request, res: Response) => {
+      if (req.path.includes('/api/') || req.path.endsWith('/api')) {
+        return res.status(404).json({ error: 'API endpoint not found' });
+      }
       res.sendFile(path.join(distPath, 'index.html'));
-    });
+    };
+
+    if (BASE_PATH && BASE_PATH !== '') {
+      app.get(`${BASE_PATH}/*`, spaHandler);
+    }
+    app.get('*', spaHandler);
   }
 
   app.listen(PORT, '0.0.0.0', () => {

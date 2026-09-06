@@ -215,7 +215,7 @@ When proxying `/form` to the backend on `localhost:3000`:
 
 ### Lighttpd Reverse Proxy Configuration
 
-Lighttpd uses the `mod_proxy` and `mod_redirect` modules to forward requests to the Node.js backend.
+Lighttpd uses the `mod_proxy` and `mod_redirect` modules to forward requests to the Node.js backend. This works on **any port** (80, 443, 8080, 8443, etc.).
 
 #### Step 1: Enable required modules
 In Debian/Ubuntu:
@@ -231,16 +231,16 @@ server.modules += (
 )
 ```
 
-#### Step 2: Configure HTTP (Port 80) Subpath Proxy
+#### Step 2: Configure HTTP Subpath Proxy (Any Port, e.g. Port 80 or 8080)
 Add the following configuration block (e.g. in `/etc/lighttpd/conf-available/10-proxy-form.conf` or inside your `lighttpd.conf`):
 
 ```lighttpd
-# Redirect /form (without trailing slash) to /form/
+# Enforce trailing slash so the browser resolves relative assets (./assets/...) to /form/assets/...
 url.redirect += (
     "^/form$" => "/form/"
 )
 
-# Reverse proxy all /form/ requests to localhost:3000
+# Reverse proxy all /form/ requests to Node.js backend on localhost:3000
 $HTTP["url"] =~ "^/form/" {
     proxy.server = ( "" => ( 
         ( "host" => "127.0.0.1", "port" => 3000 ) 
@@ -250,6 +250,17 @@ $HTTP["url"] =~ "^/form/" {
     )
 }
 ```
+
+> [!NOTE]
+> If your Lighttpd listens on a custom port (such as 8080, 8443), the configuration is identical. The `url.redirect` rule and `^/form/` proxy block apply regardless of the listening port:
+> ```lighttpd
+> $SERVER["socket"] == ":8080" {
+>     url.redirect += ( "^/form$" => "/form/" )
+>     $HTTP["url"] =~ "^/form/" {
+>         proxy.server = ( "" => ( ( "host" => "127.0.0.1", "port" => 3000 ) ) )
+>     }
+> }
+> ```
 
 #### Step 3: Configure HTTPS (Port 443 with SSL/TLS)
 For an SSL/TLS enabled virtual host:
@@ -274,16 +285,9 @@ $SERVER["socket"] == ":443" {
         )
     }
 }
-
-# Optional: Redirect all port 80 HTTP traffic to HTTPS
-$SERVER["socket"] == ":80" {
-    $HTTP["host"] =~ ".*" {
-        url.redirect = ( "^/(.*)" => "https://%0/$1" )
-    }
-}
 ```
 
-Restart Lighttpd:
+Restart Lighttpd after modifying the configuration:
 ```bash
 sudo systemctl restart lighttpd
 ```
@@ -342,7 +346,6 @@ Ensure `proxy` and `proxy_http` modules are active (`sudo a2enmod proxy proxy_ht
 
 ```caddy
 intranet.company.local {
-    # Caddy handles trailing slash and websocket upgrades automatically
     redir /form /form/ 301
     handle_path /form/* {
         reverse_proxy 127.0.0.1:3000
@@ -355,12 +358,31 @@ intranet.company.local {
 ## 6. Troubleshooting Reverse Proxies
 
 ### Blank Page with Header / Empty Body
-**Symptom**: When visiting `http://your-server/form`, the page displays the title in the browser tab, but the main body is completely blank.
-- **Cause**: The browser loaded `index.html`, but the JavaScript bundles were requested at root `/assets/...` instead of `/form/assets/...` (or the URL lacked a trailing slash, causing relative `./assets/...` to be resolved against root `/`).
-- **Solution**:
-  1. Ensure you have run `npm run build` so that the latest bundle with relative asset links (`base: './'`) is generated in `dist/`.
-  2. Confirm your reverse proxy configuration contains a redirect from `/form` to `/form/` (or rely on the application's built-in redirect).
-  3. Verify that `BASE_PATH` in `.env` matches the proxy subpath (e.g. `BASE_PATH=/form`).
+**Symptom**: When visiting `http://your-server:<port>/form`, the browser displays the document title in the browser tab, but the body is completely blank or renders only an empty root container.
+
+**Root Causes & Fixes**:
+
+1. **Running Development Mode Behind Proxy without Production Build**:
+   - *Problem*: Running `npm run dev` or `node server.ts` starts Vite's on-the-fly compiler. In development mode, Vite previously generated absolute module paths starting at the root (`/src/main.tsx`, `/@vite/client`). Because the reverse proxy only proxies `/form`, module requests outside `/form` returned 404, preventing the script from running.
+   - *Fix*: Always run `npm run build` and launch using `npm start` (which executes `NODE_ENV=production node dist/server.cjs`). When `dist/` is present, the server automatically serves the compiled production bundles with relative asset paths. If you must run development mode, Vite's dev server is now configured with `base: '/form/'` so all development script requests stay within `/form/`.
+
+2. **Missing Trailing Slash on the Subpath URL (`/form` vs `/form/`)**:
+   - *Problem*: When visiting `http://your-server:port/form` (without a trailing slash), browser relative URL resolution treats `/form` as a filename and resolves `./assets/index.js` against the root domain (`http://your-server:port/assets/index.js`), which the reverse proxy does not forward.
+   - *Fix*: The HTML now includes an inline client-side bootstrap script in `<head>` that instantly replaces `/form` with `/form/` before any assets are requested. Additionally, make sure Lighttpd has `url.redirect += ( "^/form$" => "/form/" )`.
+
+3. **Verify Reverse Proxy Connectivity with `curl`**:
+   Run these verification commands on your server to confirm every layer is responding:
+   ```bash
+   # 1. Test backend on port 3000 directly:
+   curl -i http://127.0.0.1:3000/form/
+   curl -i http://127.0.0.1:3000/form/api/config
+
+   # 2. Test through your reverse proxy (e.g. port 8080):
+   curl -i http://127.0.0.1:8080/form/
+   curl -i http://127.0.0.1:8080/form/api/config
+   ```
+   Both calls should return `HTTP/1.1 200 OK` (or `HTTP/1.1 301` if trailing slash is omitted).
+
 
 ---
 
