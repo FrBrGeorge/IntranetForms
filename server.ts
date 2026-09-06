@@ -118,6 +118,7 @@ function generateToken(prefix: string = 'key'): string {
 
 async function startServer() {
   const app = express();
+  app.enable('trust proxy');
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));
 
@@ -136,7 +137,11 @@ async function startServer() {
     next();
   };
 
-  // 1. Config endpoint
+  // 1. Config & Health endpoints
+  apiRouter.get('/health', (req: Request, res: Response) => {
+    res.json({ status: 'ok', basePath: BASE_PATH });
+  });
+
   apiRouter.get('/config', (req: Request, res: Response) => {
     res.json({
       basePath: BASE_PATH,
@@ -509,7 +514,9 @@ async function startServer() {
   // Static serving in production vs Vite middleware in development
   const distPath = path.join(process.cwd(), 'dist');
   const distIndexExists = fs.existsSync(path.join(distPath, 'index.html'));
-  const isProduction = process.env.NODE_ENV === 'production' || (distIndexExists && process.env.NODE_ENV !== 'development');
+  const isBundle = typeof __filename !== 'undefined' && (__filename.endsWith('.cjs') || __filename.includes('dist'));
+  const isExplicitDev = process.env.NODE_ENV === 'development' && !isBundle;
+  const isProduction = process.env.NODE_ENV === 'production' || isBundle || (distIndexExists && !isExplicitDev);
 
   if (!isProduction) {
     const vite = await createViteServer({
@@ -531,15 +538,25 @@ async function startServer() {
     // Serve static assets at root /
     app.use(express.static(distPath));
 
-    // Catch-all SPA fallback: ensure API routes never return HTML
+    // Catch-all SPA fallback: ensure API routes and asset files never return HTML
     const spaHandler = (req: Request, res: Response) => {
-      if (req.path.includes('/api/') || req.path.endsWith('/api')) {
-        return res.status(404).json({ error: 'API endpoint not found' });
+      if (
+        req.path.includes('/api/') ||
+        req.path.endsWith('/api') ||
+        req.path.includes('/assets/') ||
+        req.path.match(/\.(js|css|json|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|map)$/i)
+      ) {
+        return res.status(404).json({ error: 'Resource not found' });
       }
+
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     };
 
     if (BASE_PATH && BASE_PATH !== '') {
+      app.get(BASE_PATH, spaHandler);
       app.get(`${BASE_PATH}/*`, spaHandler);
     }
     app.get('*', spaHandler);

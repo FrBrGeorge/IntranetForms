@@ -4,8 +4,9 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const basePath = (process.env.BASE_PATH || '/form').replace(/\/+$/, '');
   return {
-    base: './',
+    base: basePath ? `${basePath}/` : '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

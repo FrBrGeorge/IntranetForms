@@ -235,13 +235,8 @@ server.modules += (
 Add the following configuration block (e.g. in `/etc/lighttpd/conf-available/10-proxy-form.conf` or inside your `lighttpd.conf`):
 
 ```lighttpd
-# Enforce trailing slash so the browser resolves relative assets (./assets/...) to /form/assets/...
-url.redirect += (
-    "^/form$" => "/form/"
-)
-
-# Reverse proxy all /form/ requests to Node.js backend on localhost:3000
-$HTTP["url"] =~ "^/form/" {
+# Match all requests starting with /form (both /form and /form/...)
+$HTTP["url"] =~ "^/form" {
     proxy.server = ( "" => ( 
         ( "host" => "127.0.0.1", "port" => 3000 ) 
     ) )
@@ -251,16 +246,24 @@ $HTTP["url"] =~ "^/form/" {
 }
 ```
 
+> [!IMPORTANT]
+> **Regex Trailing Slash**: Notice `$HTTP["url"] =~ "^/form"` (without a trailing slash at the end of the regex).
+> If you write `^/form/` instead, visiting `http://your-server:port/form` will **NOT match** the proxy block, and Lighttpd will return an empty page or its default 404!
+> Using `^/form` ensures both `/form`, `/form/`, `/form/assets/...`, and `/form/api/...` are properly forwarded.
+
 > [!NOTE]
-> If your Lighttpd listens on a custom port (such as 8080, 8443), the configuration is identical. The `url.redirect` rule and `^/form/` proxy block apply regardless of the listening port:
+> If your Lighttpd listens on a custom port (such as 8080 or 8443) via `$SERVER["socket"]`:
 > ```lighttpd
 > $SERVER["socket"] == ":8080" {
->     url.redirect += ( "^/form$" => "/form/" )
->     $HTTP["url"] =~ "^/form/" {
->         proxy.server = ( "" => ( ( "host" => "127.0.0.1", "port" => 3000 ) ) )
+>     $HTTP["url"] =~ "^/form" {
+>         proxy.server = ( "" => ( 
+>             ( "host" => "127.0.0.1", "port" => 3000 ) 
+>         ) )
+>         proxy.header = ( "upgrade" => "enable" )
 >     }
 > }
 > ```
+> Always ensure `"host" => "127.0.0.1"` is used rather than `"localhost"` to avoid IPv6 `::1` connection errors.
 
 #### Step 3: Configure HTTPS (Port 443 with SSL/TLS)
 For an SSL/TLS enabled virtual host:
@@ -370,19 +373,40 @@ intranet.company.local {
    - *Problem*: When visiting `http://your-server:port/form` (without a trailing slash), browser relative URL resolution treats `/form` as a filename and resolves `./assets/index.js` against the root domain (`http://your-server:port/assets/index.js`), which the reverse proxy does not forward.
    - *Fix*: The HTML now includes an inline client-side bootstrap script in `<head>` that instantly replaces `/form` with `/form/` before any assets are requested. Additionally, make sure Lighttpd has `url.redirect += ( "^/form$" => "/form/" )`.
 
-3. **Verify Reverse Proxy Connectivity with `curl`**:
-   Run these verification commands on your server to confirm every layer is responding:
-   ```bash
-   # 1. Test backend on port 3000 directly:
-   curl -i http://127.0.0.1:3000/form/
-   curl -i http://127.0.0.1:3000/form/api/config
+### Still Blank Page After Reverse Proxy Port Change?
 
-   # 2. Test through your reverse proxy (e.g. port 8080):
-   curl -i http://127.0.0.1:8080/form/
-   curl -i http://127.0.0.1:8080/form/api/config
-   ```
-   Both calls should return `HTTP/1.1 200 OK` (or `HTTP/1.1 301` if trailing slash is omitted).
+Follow this 4-step diagnostic checklist to identify the exact cause:
 
+#### 1. Confirm which port Node.js is listening on
+Verify Node is running and listening:
+```bash
+# Check if Node is listening on 3000
+curl -i http://127.0.0.1:3000/form/api/config
+```
+If this fails, your backend service is not running or is bound to a different port.
+
+#### 2. Confirm the Reverse Proxy connects to 127.0.0.1 (not "localhost")
+In `/etc/lighttpd/lighttpd.conf`:
+```lighttpd
+# Ensure host is explicit IPv4 127.0.0.1:
+proxy.server = ( "" => ( ( "host" => "127.0.0.1", "port" => 3000 ) ) )
+```
+Using `"host" => "localhost"` can cause Linux to resolve `::1` (IPv6), which fails with `503 Service Unavailable` if Node only bound to IPv4.
+
+#### 3. Test that Javascript Assets are forwarded through the proxy port
+Suppose your reverse proxy now listens on port **8080** (or whatever port you changed it to):
+```bash
+# Test through your proxy port:
+curl -i http://127.0.0.1:8080/form/assets/index-lpDOJtxo.js | head -n 10
+```
+- If this returns `HTTP/1.1 200 OK` and `Content-Type: application/javascript`, the proxy is correctly routing assets!
+- If this returns `HTTP/1.1 404` or `text/html`, your Lighttpd regex was likely written as `^/form/` instead of `^/form`, or `proxy.server` was set with `"/form" => ...` which stripped the prefix. Use `$HTTP["url"] =~ "^/form"`.
+
+#### 4. Clear Browser Cache (Hard Refresh)
+When a browser previously loaded a blank page, it may have cached the broken 404 response or stale script references.
+- In Chrome / Edge: Press `Ctrl + Shift + R` (or `Cmd + Shift + R` on macOS).
+- In Firefox: Press `Ctrl + F5`.
+- Or open an **Incognito / Private Window** to test with a clean cache.
 
 ---
 
