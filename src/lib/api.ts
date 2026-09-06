@@ -1,7 +1,6 @@
 import { FormConfig, UserResponse, AdminStatus } from '../types';
 
-// Detect whether to use /form/api or /api based on current window location or fallback
-function getApiPrefix(): string {
+function getInitialApiPrefix(): string {
   if (typeof window !== 'undefined') {
     if (window.location.pathname.startsWith('/form')) {
       return '/form/api';
@@ -10,31 +9,79 @@ function getApiPrefix(): string {
   return '/api';
 }
 
-const API_BASE = getApiPrefix();
+let activeApiPrefix = getInitialApiPrefix();
+
+export function getActiveApiPrefix(): string {
+  return activeApiPrefix;
+}
+
+export function setActiveApiPrefix(prefix: string) {
+  activeApiPrefix = prefix.replace(/\/+$/, '');
+}
+
+/**
+ * Robust fetch wrapper with automatic fallback between /form/api and /api
+ */
+async function apiFetch(endpoint: string, options?: RequestInit): Promise<Response> {
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const primaryUrl = `${activeApiPrefix}${cleanEndpoint}`;
+
+  try {
+    const res = await fetch(primaryUrl, options);
+    // If the primary URL yielded 404, the reverse proxy might have stripped or prepended /form
+    if (res.status === 404) {
+      const altPrefix = activeApiPrefix.startsWith('/form') ? '/api' : '/form/api';
+      const altUrl = `${altPrefix}${cleanEndpoint}`;
+      try {
+        const altRes = await fetch(altUrl, options);
+        if (altRes.ok || [400, 401, 403].includes(altRes.status)) {
+          activeApiPrefix = altPrefix;
+          return altRes;
+        }
+      } catch {}
+    }
+    return res;
+  } catch (err) {
+    const altPrefix = activeApiPrefix.startsWith('/form') ? '/api' : '/form/api';
+    const altUrl = `${altPrefix}${cleanEndpoint}`;
+    try {
+      const altRes = await fetch(altUrl, options);
+      if (altRes.ok || [400, 401, 403].includes(altRes.status)) {
+        activeApiPrefix = altPrefix;
+        return altRes;
+      }
+    } catch {}
+    throw err;
+  }
+}
 
 export async function fetchServerConfig(): Promise<{ basePath: string; configuredPassphraseProtected: boolean }> {
   try {
-    const res = await fetch(`${API_BASE}/config`);
-    if (res.ok) return await res.json();
+    const res = await apiFetch('/config');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.basePath) {
+        // synchronize if needed
+        if (typeof window !== 'undefined' && window.location.pathname.startsWith(data.basePath)) {
+          activeApiPrefix = `${data.basePath}/api`;
+        }
+      }
+      return data;
+    }
   } catch (e) {
-    // fallback to /api if /form/api failed or vice-versa
-    try {
-      const fallback = API_BASE === '/api' ? '/form/api' : '/api';
-      const res2 = await fetch(`${fallback}/config`);
-      if (res2.ok) return await res2.json();
-    } catch {}
+    console.warn('Failed to fetch server config, using defaults:', e);
   }
   return { basePath: '/form', configuredPassphraseProtected: true };
 }
 
 export async function fetchFormConfig(): Promise<FormConfig> {
-  const res = await fetch(`${API_BASE}/form`);
+  const res = await apiFetch('/form');
   if (!res.ok) throw new Error('Failed to fetch form definition');
   return res.json();
 }
 
 export async function updateFormConfig(form: Partial<FormConfig>, adminToken: string): Promise<FormConfig> {
-  const res = await fetch(`${API_BASE}/form`, {
+  const res = await apiFetch('/form', {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
@@ -51,7 +98,7 @@ export async function updateFormConfig(form: Partial<FormConfig>, adminToken: st
 }
 
 export async function fetchUserResponse(sessionKey: string): Promise<UserResponse> {
-  const res = await fetch(`${API_BASE}/response?sessionKey=${encodeURIComponent(sessionKey)}`);
+  const res = await apiFetch(`/response?sessionKey=${encodeURIComponent(sessionKey)}`);
   if (res.status === 403) {
     const data = await res.json().catch(() => ({}));
     if (data.error === 'SESSION_INVALIDATED') {
@@ -71,7 +118,7 @@ export async function saveUserResponse(payload: {
   field?: string;
   value?: string;
 }): Promise<{ success: boolean; response: UserResponse; savedAt: string }> {
-  const res = await fetch(`${API_BASE}/response`, {
+  const res = await apiFetch('/response', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -93,7 +140,7 @@ export async function saveUserResponse(payload: {
 }
 
 export async function resetUserSession(sessionKey: string): Promise<void> {
-  await fetch(`${API_BASE}/response?sessionKey=${encodeURIComponent(sessionKey)}`, {
+  await apiFetch(`/response?sessionKey=${encodeURIComponent(sessionKey)}`, {
     method: 'DELETE',
   });
 }
@@ -102,13 +149,13 @@ export async function resetUserSession(sessionKey: string): Promise<void> {
 export async function getAdminStatus(token?: string | null): Promise<AdminStatus> {
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${API_BASE}/admin/status`, { headers });
+  const res = await apiFetch('/admin/status', { headers });
   if (!res.ok) throw new Error('Failed to check admin status');
   return res.json();
 }
 
 export async function claimFirstAdmin(): Promise<{ success: boolean; token: string }> {
-  const res = await fetch(`${API_BASE}/admin/claim-first`, { method: 'POST' });
+  const res = await apiFetch('/admin/claim-first', { method: 'POST' });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message || 'Failed to claim initial admin rights');
@@ -117,7 +164,7 @@ export async function claimFirstAdmin(): Promise<{ success: boolean; token: stri
 }
 
 export async function claimForceAdmin(passphrase: string): Promise<{ success: boolean; token: string }> {
-  const res = await fetch(`${API_BASE}/admin/claim-force`, {
+  const res = await apiFetch('/admin/claim-force', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ passphrase }),
@@ -130,7 +177,7 @@ export async function claimForceAdmin(passphrase: string): Promise<{ success: bo
 }
 
 export async function regenerateAdminToken(token: string): Promise<{ token: string }> {
-  const res = await fetch(`${API_BASE}/admin/regenerate-token`, {
+  const res = await apiFetch('/admin/regenerate-token', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -143,7 +190,7 @@ export async function fetchAdminResponses(token: string): Promise<{
   total: number;
   form: FormConfig;
 }> {
-  const res = await fetch(`${API_BASE}/admin/responses`, {
+  const res = await apiFetch('/admin/responses', {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error('Failed to load responses');
@@ -151,7 +198,7 @@ export async function fetchAdminResponses(token: string): Promise<{
 }
 
 export async function invalidateUserSession(sessionKey: string, token: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/admin/invalidate-user`, {
+  const res = await apiFetch('/admin/invalidate-user', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -163,7 +210,7 @@ export async function invalidateUserSession(sessionKey: string, token: string): 
 }
 
 export async function reactivateUserSession(sessionKey: string, token: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/admin/reactivate-user`, {
+  const res = await apiFetch('/admin/reactivate-user', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -175,7 +222,7 @@ export async function reactivateUserSession(sessionKey: string, token: string): 
 }
 
 export async function invalidateAllUserSessions(token: string): Promise<number> {
-  const res = await fetch(`${API_BASE}/admin/invalidate-all-users`, {
+  const res = await apiFetch('/admin/invalidate-all-users', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -185,7 +232,7 @@ export async function invalidateAllUserSessions(token: string): Promise<number> 
 }
 
 export async function deleteUserResponse(sessionKey: string, token: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/admin/responses/${encodeURIComponent(sessionKey)}`, {
+  const res = await apiFetch(`/admin/responses/${encodeURIComponent(sessionKey)}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -193,5 +240,5 @@ export async function deleteUserResponse(sessionKey: string, token: string): Pro
 }
 
 export function getExportUrl(format: 'csv' | 'json', token: string): string {
-  return `${API_BASE}/admin/export?format=${format}&token=${encodeURIComponent(token)}`;
+  return `${activeApiPrefix}/admin/export?format=${format}&token=${encodeURIComponent(token)}`;
 }

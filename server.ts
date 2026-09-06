@@ -493,16 +493,47 @@ async function startServer() {
     res.json({ status: 'ok', basePath: BASE_PATH });
   });
 
+  // Trailing slash redirect for BASE_PATH (e.g. /form -> /form/)
+  // Ensures browser resolves relative ./assets/ relative to /form/ instead of /
+  if (BASE_PATH && BASE_PATH !== '') {
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      const pathOnly = req.originalUrl.split('?')[0];
+      if (pathOnly === BASE_PATH) {
+        const query = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
+        return res.redirect(301, `${BASE_PATH}/${query}`);
+      }
+      next();
+    });
+  }
+
   // Vite middleware in development vs static serving in production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
+    if (BASE_PATH && BASE_PATH !== '') {
+      // Strip BASE_PATH so vite middlewares receive /...
+      app.use(BASE_PATH, vite.middlewares);
+    }
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+
+    if (BASE_PATH && BASE_PATH !== '') {
+      // Serve static assets under BASE_PATH (e.g. /form/assets/...)
+      app.use(BASE_PATH, express.static(distPath));
+    }
+
+    // Serve static assets at root /
     app.use(express.static(distPath));
+
+    // Catch-all SPA fallback
+    if (BASE_PATH && BASE_PATH !== '') {
+      app.get(`${BASE_PATH}/*`, (req: Request, res: Response) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
     app.get('*', (req: Request, res: Response) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });

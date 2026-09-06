@@ -414,7 +414,7 @@ export default function App() {
         <footer className="h-12 border-t border-slate-100 flex items-center px-6 sm:px-10 justify-between text-[11px] text-slate-400 shrink-0 bg-white">
           <div>Session active &bull; Auto-saving enabled</div>
           <div className="flex gap-4">
-            <span>Server: Python / Node.js</span>
+            <span>Server: Node.js / Express</span>
             <span className="hidden sm:inline">Proxy: {basePath}</span>
           </div>
         </footer>

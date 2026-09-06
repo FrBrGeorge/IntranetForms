@@ -1,6 +1,6 @@
 # Intranet Forms & Task Reporting System
 
-A lightweight, self-hosted web application engineered for internal networks, team wikis, incident response logging, and task tracking. Built with a modern React 19 interface and a zero-dependency local JSON database, it provides seamless real-time autosaving, zero-loss response capture, and comprehensive administrative controls.
+A lightweight, self-hosted web application engineered for internal networks, team wikis, incident response logging, and task tracking. Built with a modern React 19 interface, an Express & TypeScript server, and a zero-dependency local JSON database, it provides seamless real-time autosaving, zero-loss response capture, and comprehensive administrative controls.
 
 ---
 
@@ -37,18 +37,14 @@ A lightweight, self-hosted web application engineered for internal networks, tea
 - **JSON Export**: Complete structured JSON export including form schema definition, responses, and export metadata for downstream reporting or ETL pipelines.
 
 ### 7. Multi-Application Reverse Proxy Architecture
-- **Configurable `BASE_PATH`**: Configurable leading path prefix (defaults to `/form`), allowing the app to sit behind corporate reverse proxies (e.g. `https://intranet.company.com/form`).
-- **Dual Route Registration**: API routes are mounted simultaneously on both `${BASE_PATH}/api` and `/api`, guaranteeing compatibility across direct ports and reverse proxy rewrites.
-- **Dynamic Client Discovery**: The frontend queries `/api/config` on load to dynamically determine its reverse proxy base URL and security status.
+- **Configurable `BASE_PATH` & Relative Assets**: Supports hosting behind reverse proxies (Lighttpd, NGINX, Apache, Caddy) under subpaths such as `/form` (e.g. `https://intranet.company.com/form/`).
+- **Dual Route Registration**: API routes are mounted simultaneously on both `${BASE_PATH}/api` and `/api`, guaranteeing compatibility whether the proxy rewrites or preserves subpath prefixes.
+- **Dynamic Client Discovery & Fallback**: The client-side automatically discovers and falls back between proxy base paths to ensure zero connection failures.
 
 ### 8. Zero-Dependency File Database
 - All form configurations, admin credentials, and submissions persist to a local file: `data/db.json`.
 - Uses atomic file writes (writing to temporary `.tmp` files before renaming) to prevent corruption during unexpected shutdowns.
 - No external relational database (MySQL, PostgreSQL) or NoSQL database (MongoDB, Redis) required.
-
-### 9. Dual-Engine Server Implementation
-- **Node.js / Express**: Full TypeScript implementation with Vite integration in development and bundled CommonJS production output (`server.ts`).
-- **Python Alternative**: Standalone server (`server.py`) supporting the lightweight Bottle framework with an automatic fallback to Python's built-in standard library (`http.server`).
 
 ---
 
@@ -59,8 +55,7 @@ A lightweight, self-hosted web application engineered for internal networks, tea
 | **Frontend Framework** | React 19, TypeScript |
 | **Styling & Icons** | Tailwind CSS v4, Lucide React |
 | **Build & Bundler** | Vite 6, esbuild |
-| **Node.js Backend** | Express 4, TypeScript, tsx |
-| **Python Backend** | Python 3 (Bottle or built-in `http.server`) |
+| **Backend Runtime** | Node.js (v18+ / v20 LTS / v22 LTS), Express 4, TypeScript |
 | **Storage** | Local JSON flat-file database with atomic writes (`data/db.json`) |
 
 ---
@@ -101,4 +96,4 @@ All endpoints are accessible with or without the configured `BASE_PATH` prefix:
 
 ## Getting Started
 
-For detailed installation and production deployment instructions for both Node.js and Python variants, refer to [INSTALL.md](./INSTALL.md).
+For detailed installation, process management, and reverse proxy deployment instructions (including Lighttpd, NGINX, Apache, and Caddy), refer to [INSTALL.md](./INSTALL.md).
